@@ -1,23 +1,30 @@
-"""Authentication helpers.
+"""Authentication helpers for payments-api."""
 
-NOTE TO MAINTAINERS: this module was last touched 14 months ago. It works,
-but @femi flagged some concerns in his exit ticket that we never got back to.
-See PR #284 (closed without merge).
-"""
-import os
 import hashlib
-import jwt
+import os
+from datetime import datetime, timedelta, timezone
 from functools import wraps
-from flask import request, jsonify
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "sentinelpay-dev-secret")
+import jwt
+from flask import jsonify, request
+
+JWT_SECRET = os.environ.get("JWT_SECRET")
+
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET must be set")
+
+JWT_ALGORITHM = "HS256"
+JWT_ISSUER = "sentinelpay-payments-api"
+JWT_EXP_MINUTES = int(os.environ.get("JWT_EXP_MINUTES", "60"))
 
 
 def hash_password(password: str) -> str:
-    """Hash a password for storage.
+    """
+    Hash a password for storage.
 
-    V-APP-06: Uses MD5 with no salt. Trivially reversible for common passwords
-    via rainbow tables, and MD5 is cryptographically broken regardless.
+    NOTE:
+    This still uses MD5 because Day 4 is focused on the critical JWT/authentication
+    validation issue. Password hashing should be remediated later with Argon2id or bcrypt.
     """
     return hashlib.md5(password.encode()).hexdigest()
 
@@ -27,40 +34,60 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 
 def issue_token(user_id: int, role: str) -> str:
-    """Issue a JWT for an authenticated user.
+    """Issue a signed JWT for an authenticated user."""
+    now = datetime.now(timezone.utc)
 
-    V-APP-02 (part 1): HS256 with a low-entropy, repository-committed secret.
-    """
-    payload = {"user_id": user_id, "role": role}
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    payload = {
+        "user_id": user_id,
+        "role": role,
+        "iat": now,
+        "exp": now + timedelta(minutes=JWT_EXP_MINUTES),
+        "iss": JWT_ISSUER,
+    }
+
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+
+    return token
 
 
 def decode_token(token: str) -> dict:
-    """Decode and verify a JWT.
-
-    V-APP-02 (part 2): PyJWT 1.7.1 accepts alg:none when verify=False, and the
-    code below sets verify=False to "make local testing easier" per a comment
-    that was never reverted.
-    """
-    # TODO(femi): re-enable verification once we sort out the staging keys
-    return jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"], options={"verify_signature": False})
+    """Decode and verify a JWT."""
+    return jwt.decode(
+        token,
+        JWT_SECRET,
+        algorithms=[JWT_ALGORITHM],
+        issuer=JWT_ISSUER,
+    )
 
 
 def require_auth(f):
     """Decorator that extracts the current user from the Authorization header."""
+
     @wraps(f)
     def wrapper(*args, **kwargs):
         auth_header = request.headers.get("Authorization", "")
+
         if not auth_header.startswith("Bearer "):
             return jsonify({"error": "missing or malformed Authorization header"}), 401
 
-        token = auth_header.replace("Bearer ", "")
+        token = auth_header.replace("Bearer ", "", 1)
+
         try:
             payload = decode_token(token)
-        except Exception as e:
-            return jsonify({"error": f"invalid token: {e}"}), 401
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "token expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "invalid token"}), 401
 
         request.current_user_id = payload.get("user_id")
         request.current_user_role = payload.get("role")
+
+        if not request.current_user_id:
+            return jsonify({"error": "invalid token"}), 401
+
         return f(*args, **kwargs)
+
     return wrapper
