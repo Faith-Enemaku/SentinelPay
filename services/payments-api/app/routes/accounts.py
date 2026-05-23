@@ -21,8 +21,8 @@ def get_account(account_id):
     try:
         cur.execute(
             "SELECT id, user_id, account_number, currency, balance, status, created_at "
-            "FROM accounts WHERE id = %s",
-            (account_id,)
+            "FROM accounts WHERE id = %s AND user_id = %s",
+            (account_id, request.current_user_id),
         )
         account = cur.fetchone()
         if not account:
@@ -51,32 +51,37 @@ def list_accounts():
         conn.close()
 
 
+ALLOWED_PROFILE_FIELDS = set()
+
 @accounts_bp.route("/<int:account_id>/profile", methods=["PUT"])
 @require_auth
 def update_profile(account_id):
-    """Update account profile fields.
+    """Reject account profile updates unless safe editable fields are later defined.
 
-    V-APP-07: Mass assignment. The update accepts an arbitrary dict and writes
-    every key the client provides, including 'status', 'user_id', and 'balance'.
-    A merchant can transfer an account to themselves or set their balance.
+    The original implementation allowed mass assignment by accepting arbitrary
+    request body fields. In the current schema, account fields such as
+    account_number, balance, status, currency, and user_id should not be
+    user-editable.
     """
     data = request.get_json() or {}
+
+    if not data:
+        return jsonify({"error": "no fields supplied"}), 400
+
     conn = get_connection()
     cur = conn.cursor()
-    try:
-        # Build dynamic SET clause from whatever the client sent
-        if not data:
-            return jsonify({"error": "no fields supplied"}), 400
 
-        set_clause = ", ".join([f"{k} = %s" for k in data.keys()])
-        values = list(data.values()) + [account_id]
-        # Note: this is intentionally a parameterised query for the *values*,
-        # but the column names are concatenated from user input — see V-APP-07.
-        # SQLi on column names is not the bug here; mass assignment is.
-        cur.execute(f"UPDATE accounts SET {set_clause} WHERE id = %s RETURNING *", values)
-        updated = cur.fetchone()
-        conn.commit()
-        return jsonify(dict(updated))
+    try:
+        cur.execute(
+            "SELECT id FROM accounts WHERE id = %s AND user_id = %s",
+            (account_id, request.current_user_id),
+        )
+
+        if not cur.fetchone():
+            return jsonify({"error": "account not found"}), 404
+
+        return jsonify({"error": "no account profile fields are user-editable"}), 400
+
     finally:
         cur.close()
         conn.close()
