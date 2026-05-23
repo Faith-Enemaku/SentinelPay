@@ -37,26 +37,23 @@ def verify_bvn():
 @verify_bp.route("/lookup", methods=["GET"])
 @require_auth
 def lookup_kyc():
-    """Look up a KYC record by BVN or NIN.
-
-    SQLi variant in the kyc-api service. Same root cause as V-APP-01.
-    """
     bvn = request.args.get("bvn", "")
     nin = request.args.get("nin", "")
 
     conn = get_connection()
     cur = conn.cursor()
+
     try:
         if bvn:
-            query = f"SELECT * FROM kyc_records WHERE bvn = '{bvn}'"
+            cur.execute("SELECT * FROM kyc_records WHERE bvn = %s", (bvn,))
         elif nin:
-            query = f"SELECT * FROM kyc_records WHERE nin = '{nin}'"
+            cur.execute("SELECT * FROM kyc_records WHERE nin = %s", (nin,))
         else:
             return jsonify({"error": "bvn or nin required"}), 400
 
-        cur.execute(query)
         records = cur.fetchall()
         return jsonify([dict(r) for r in records])
+
     finally:
         cur.close()
         conn.close()
