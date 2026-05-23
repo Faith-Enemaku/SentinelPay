@@ -1,22 +1,43 @@
 """Authentication helpers for payments-api."""
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
 
 import jwt
 from argon2 import PasswordHasher, Type
-from argon2.exceptions import VerifyMismatchError, VerificationError
+from argon2.exceptions import VerificationError, VerifyMismatchError
 from flask import jsonify, request
 
-JWT_SECRET = os.environ.get("JWT_SECRET")
-
-if not JWT_SECRET:
-    raise RuntimeError("JWT_SECRET must be set")
-
-JWT_ALGORITHM = "HS256"
-JWT_ISSUER = "sentinelpay-payments-api"
+JWT_ALGORITHM = "RS256"
+JWT_ISSUER = os.environ.get("JWT_ISSUER", "sentinelpay-payments-api")
 JWT_EXP_MINUTES = int(os.environ.get("JWT_EXP_MINUTES", "60"))
+JWT_ACTIVE_KID = os.environ.get("JWT_ACTIVE_KID", "dev-key-1")
+
+JWT_PRIVATE_KEY_PATH = os.environ.get("JWT_PRIVATE_KEY_PATH")
+JWT_PUBLIC_KEYS_PATH = os.environ.get("JWT_PUBLIC_KEYS_PATH")
+
+if not JWT_PRIVATE_KEY_PATH:
+    raise RuntimeError("JWT_PRIVATE_KEY_PATH must be set")
+
+if not JWT_PUBLIC_KEYS_PATH:
+    raise RuntimeError("JWT_PUBLIC_KEYS_PATH must be set")
+
+
+def load_private_key() -> str:
+    """Load the active private key used to sign JWTs."""
+    return Path(JWT_PRIVATE_KEY_PATH).read_text()
+
+
+def load_public_keys() -> dict:
+    """Load public keys used to verify JWTs by key ID."""
+    return json.loads(Path(JWT_PUBLIC_KEYS_PATH).read_text())
+
+
+JWT_PRIVATE_KEY = load_private_key()
+JWT_PUBLIC_KEYS = load_public_keys()
 
 password_hasher = PasswordHasher(type=Type.ID)
 
@@ -46,7 +67,12 @@ def issue_token(user_id: int, role: str) -> str:
         "iss": JWT_ISSUER,
     }
 
-    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    token = jwt.encode(
+        payload,
+        JWT_PRIVATE_KEY,
+        algorithm=JWT_ALGORITHM,
+        headers={"kid": JWT_ACTIVE_KID},
+    )
 
     if isinstance(token, bytes):
         token = token.decode("utf-8")
@@ -55,10 +81,26 @@ def issue_token(user_id: int, role: str) -> str:
 
 
 def decode_token(token: str) -> dict:
-    """Decode and verify a JWT."""
+    """Decode and verify a JWT using the public key identified by kid."""
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.InvalidTokenError as exc:
+        raise jwt.InvalidTokenError("invalid token header") from exc
+
+    if header.get("alg") != JWT_ALGORITHM:
+        raise jwt.InvalidTokenError("unexpected signing algorithm")
+
+    kid = header.get("kid")
+    if not kid:
+        raise jwt.InvalidTokenError("missing key id")
+
+    public_key = JWT_PUBLIC_KEYS.get(kid)
+    if not public_key:
+        raise jwt.InvalidTokenError("unknown key id")
+
     return jwt.decode(
         token,
-        JWT_SECRET,
+        public_key,
         algorithms=[JWT_ALGORITHM],
         issuer=JWT_ISSUER,
     )
