@@ -1,11 +1,12 @@
 """Authentication helpers for payments-api."""
 
-import hashlib
 import os
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 import jwt
+from argon2 import PasswordHasher, Type
+from argon2.exceptions import VerifyMismatchError, VerificationError
 from flask import jsonify, request
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
@@ -17,20 +18,20 @@ JWT_ALGORITHM = "HS256"
 JWT_ISSUER = "sentinelpay-payments-api"
 JWT_EXP_MINUTES = int(os.environ.get("JWT_EXP_MINUTES", "60"))
 
+password_hasher = PasswordHasher(type=Type.ID)
+
 
 def hash_password(password: str) -> str:
-    """
-    Hash a password for storage.
-
-    NOTE:
-    This still uses MD5 because Day 4 is focused on the critical JWT/authentication
-    validation issue. Password hashing should be remediated later with Argon2id or bcrypt.
-    """
-    return hashlib.md5(password.encode()).hexdigest()
+    """Hash a password using Argon2id."""
+    return password_hasher.hash(password)
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    return hash_password(password) == stored_hash
+    """Verify a password against an Argon2id hash."""
+    try:
+        return password_hasher.verify(stored_hash, password)
+    except (VerifyMismatchError, VerificationError, ValueError):
+        return False
 
 
 def issue_token(user_id: int, role: str) -> str:
