@@ -5,6 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, jsonify, request
 
+from app.audit import audit_log
 from app.auth import require_auth
 from app.db import get_connection
 
@@ -33,6 +34,13 @@ def credit_wallet(account_id):
     description = data.get("description", "credit")
 
     if amount is None:
+        audit_log(
+            "wallet.credit.failed",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id},
+            outcome="failed",
+            details={"reason": "invalid_amount"},
+        )
         return jsonify({"error": "amount must be a positive number"}), 400
 
     conn = get_connection()
@@ -50,6 +58,13 @@ def credit_wallet(account_id):
 
         if not row:
             conn.rollback()
+            audit_log(
+                "wallet.credit.denied",
+                actor_id=request.current_user_id,
+                target={"account_id": account_id},
+                outcome="denied",
+                details={"reason": "not_found_or_not_owner"},
+            )
             return jsonify({"error": "account not found"}), 404
 
         new_balance = Decimal(str(row["balance"])) + amount
@@ -70,10 +85,25 @@ def credit_wallet(account_id):
 
         conn.commit()
 
+        audit_log(
+            "wallet.credit.success",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id, "reference": reference},
+            outcome="success",
+            details={"amount": str(amount), "new_balance": str(new_balance)},
+        )
+
         return jsonify({"reference": reference, "new_balance": str(new_balance)})
 
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        audit_log(
+            "wallet.credit.failed",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id},
+            outcome="failed",
+            details={"reason": type(exc).__name__},
+        )
         raise
 
     finally:
@@ -92,6 +122,13 @@ def debit_wallet(account_id):
     description = data.get("description", "debit")
 
     if amount is None:
+        audit_log(
+            "wallet.debit.failed",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id},
+            outcome="failed",
+            details={"reason": "invalid_amount"},
+        )
         return jsonify({"error": "amount must be a positive number"}), 400
 
     conn = get_connection()
@@ -109,12 +146,26 @@ def debit_wallet(account_id):
 
         if not row:
             conn.rollback()
+            audit_log(
+                "wallet.debit.denied",
+                actor_id=request.current_user_id,
+                target={"account_id": account_id},
+                outcome="denied",
+                details={"reason": "not_found_or_not_owner"},
+            )
             return jsonify({"error": "account not found"}), 404
 
         current_balance = Decimal(str(row["balance"]))
 
         if current_balance < amount:
             conn.rollback()
+            audit_log(
+                "wallet.debit.failed",
+                actor_id=request.current_user_id,
+                target={"account_id": account_id},
+                outcome="failed",
+                details={"reason": "insufficient_funds", "amount": str(amount)},
+            )
             return jsonify({"error": "insufficient funds"}), 400
 
         new_balance = current_balance - amount
@@ -135,10 +186,25 @@ def debit_wallet(account_id):
 
         conn.commit()
 
+        audit_log(
+            "wallet.debit.success",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id, "reference": reference},
+            outcome="success",
+            details={"amount": str(amount), "new_balance": str(new_balance)},
+        )
+
         return jsonify({"reference": reference, "new_balance": str(new_balance)})
 
-    except Exception:
+    except Exception as exc:
         conn.rollback()
+        audit_log(
+            "wallet.debit.failed",
+            actor_id=request.current_user_id,
+            target={"account_id": account_id},
+            outcome="failed",
+            details={"reason": type(exc).__name__},
+        )
         raise
 
     finally:

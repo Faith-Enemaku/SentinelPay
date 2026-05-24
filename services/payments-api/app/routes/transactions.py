@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request
 
+from app.audit import audit_log
 from app.auth import require_auth
 from app.db import get_connection
 
@@ -11,12 +12,7 @@ transactions_bp = Blueprint("transactions", __name__)
 @transactions_bp.route("/search", methods=["GET"])
 @require_auth
 def search_transactions():
-    """Search transactions belonging to the authenticated user.
-
-    Fixes SQL injection by using parameterised queries.
-    Also prevents cross-account access by joining transactions to accounts
-    owned by the current user.
-    """
+    """Search transactions belonging to the authenticated user."""
     q = request.args.get("q", "")
     account_id = request.args.get("account_id")
 
@@ -46,6 +42,13 @@ def search_transactions():
         cur.execute(query, tuple(params))
         rows = cur.fetchall()
 
+        audit_log(
+            "transaction.search.success",
+            actor_id=request.current_user_id,
+            outcome="success",
+            details={"query": q, "account_id": account_id, "result_count": len(rows)},
+        )
+
         return jsonify([dict(row) for row in rows])
 
     finally:
@@ -73,7 +76,21 @@ def get_transaction(reference):
         row = cur.fetchone()
 
         if not row:
+            audit_log(
+                "transaction.lookup.denied",
+                actor_id=request.current_user_id,
+                target={"reference": reference},
+                outcome="denied",
+                details={"reason": "not_found_or_not_owner"},
+            )
             return jsonify({"error": "transaction not found"}), 404
+
+        audit_log(
+            "transaction.lookup.success",
+            actor_id=request.current_user_id,
+            target={"reference": reference, "account_id": row["account_id"]},
+            outcome="success",
+        )
 
         return jsonify(dict(row))
 
