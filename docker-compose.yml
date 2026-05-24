@@ -36,6 +36,7 @@ services:
       KYC_BUCKET: sentinelpay-kyc-documents
       WEBHOOK_TIMEOUT: "10"
       ENVIRONMENT: development
+      INTERNAL_SIGNING_SECRET: sentinelpay-internal-signing-secret-dev
     volumes:
       - ./secrets/jwt_private_key_dev.pem:/run/secrets/jwt_private_key.pem:ro
       - ./secrets/jwt_public_keys.json:/run/secrets/jwt_public_keys.json:ro
@@ -59,6 +60,7 @@ services:
       KYC_BUCKET: sentinelpay-kyc-documents
       BVN_LOOKUP_URL: https://api.mock-cbn.local/bvn
       ENVIRONMENT: development
+      INTERNAL_SIGNING_SECRET: sentinelpay-internal-signing-secret-dev
     volumes:
       - ./secrets/jwt_public_keys.json:/run/secrets/jwt_public_keys.json:ro
     depends_on:

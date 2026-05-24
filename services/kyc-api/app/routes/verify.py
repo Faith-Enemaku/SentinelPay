@@ -5,6 +5,7 @@ from flask import Blueprint, request, jsonify
 
 from app.db import get_connection
 from app.auth import require_auth
+from app.request_signing import require_internal_signature
 
 verify_bp = Blueprint("verify", __name__)
 
@@ -57,3 +58,10 @@ def lookup_kyc():
     finally:
         cur.close()
         conn.close()
+
+@verify_bp.route("/internal/bvn", methods=["POST"])
+@require_auth
+@require_internal_signature
+def verify_bvn_internal():
+    """Internal BVN verification endpoint requiring JWT and signed service request."""
+    return verify_bvn()
