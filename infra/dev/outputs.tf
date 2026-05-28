@@ -82,3 +82,48 @@ output "redis_primary_endpoint" {
   description = "Redis primary endpoint if enabled."
   value       = module.data.redis_primary_endpoint
 }
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name."
+  value       = module.compute_edge.ecs_cluster_name
+}
+
+output "payments_ecr_repository_url" {
+  description = "Payments API ECR repository URL."
+  value       = module.compute_edge.payments_ecr_repository_url
+}
+
+output "kyc_ecr_repository_url" {
+  description = "KYC API ECR repository URL."
+  value       = module.compute_edge.kyc_ecr_repository_url
+}
+
+output "alb_dns_name" {
+  description = "Application Load Balancer DNS name."
+  value       = module.compute_edge.alb_dns_name
+}
+
+output "alb_security_group_id" {
+  description = "ALB security group ID."
+  value       = module.compute_edge.alb_security_group_id
+}
+
+output "ecs_tasks_security_group_id" {
+  description = "ECS tasks security group ID."
+  value       = module.compute_edge.ecs_tasks_security_group_id
+}
+
+output "payments_service_name" {
+  description = "Payments API ECS service name."
+  value       = module.compute_edge.payments_service_name
+}
+
+output "kyc_service_name" {
+  description = "KYC API ECS service name."
+  value       = module.compute_edge.kyc_service_name
+}
+
+output "waf_web_acl_arn" {
+  description = "WAF Web ACL ARN."
+  value       = module.compute_edge.waf_web_acl_arn
+}

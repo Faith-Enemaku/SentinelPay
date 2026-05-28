@@ -46,3 +46,9 @@ terraform.rc
 
 # Ignore the local .terraform directory (where providers and modules are cached)
 .terraform/
+
+# Terraform plan/output files
+*.tfplan
+tfplan
+tfplan.json
+*.tfplan.json
