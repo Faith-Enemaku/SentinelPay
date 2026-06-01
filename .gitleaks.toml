@@ -4,5 +4,5 @@ useDefault = true
 [[allowlists]]
 description = "Ignore archived security scan evidence reports"
 paths = [
-  '''^docs/scans/.*'''
+  'docs/scans'
 ]

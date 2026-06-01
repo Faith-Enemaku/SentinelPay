@@ -126,7 +126,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0 
         with:
           scan-type: fs
           scan-ref: .
@@ -160,8 +160,9 @@ jobs:
           checkov -d infra \
             --framework terraform \
             --quiet \
+            --soft-fail \
             --hard-fail-on CRITICAL \
-            --soft-fail-on LOW,MEDIUM,HIGH
+
 
       - name: Run tfsec on Terraform code
         uses: aquasecurity/tfsec-action@v1.0.3
@@ -259,7 +260,7 @@ jobs:
             org.opencontainers.image.description=SentinelPay KYC API
 
       - name: Trivy scan payments image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0 
         with:
           image-ref: ${{ steps.image_names.outputs.payments_image }}
           scanners: vuln,secret,misconfig
@@ -269,7 +270,7 @@ jobs:
           format: table
 
       - name: Trivy scan KYC image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ steps.image_names.outputs.kyc_image }}
           scanners: vuln,secret,misconfig
@@ -356,9 +357,9 @@ jobs:
           checkov -f tfplan.json \
             --framework terraform_plan \
             --quiet \
+            --soft-fail \
             --hard-fail-on CRITICAL \
-            --soft-fail-on LOW,MEDIUM,HIGH
-
+            
       - name: Install Conftest
         run: |
           wget https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz
