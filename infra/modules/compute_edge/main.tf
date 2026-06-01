@@ -12,9 +12,21 @@ locals {
 
   payments_task_role_name = element(split("/", var.payments_task_role_arn), length(split("/", var.payments_task_role_arn)) - 1)
   kyc_task_role_name      = element(split("/", var.kyc_task_role_arn), length(split("/", var.kyc_task_role_arn)) - 1)
+  ecs_execution_role_name = element(split("/", var.ecs_task_execution_role_arn), length(split("/", var.ecs_task_execution_role_arn)) - 1)
 
   payments_image = "${aws_ecr_repository.payments.repository_url}:${var.payments_image_tag}"
   kyc_image      = "${aws_ecr_repository.kyc.repository_url}:${var.kyc_image_tag}"
+}
+data "aws_secretsmanager_secret" "jwt_private_key" {
+  name = "${local.name_prefix}/jwt/private-key"
+}
+
+data "aws_secretsmanager_secret" "jwt_public_key" {
+  name = "${local.name_prefix}/jwt/public-key"
+}
+
+data "aws_secretsmanager_secret" "jwt_public_keys_json" {
+  name = "${local.name_prefix}/jwt/public-keys-json"
 }
 
 resource "aws_ecr_repository" "payments" {
@@ -114,6 +126,30 @@ resource "aws_cloudwatch_log_group" "kyc" {
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-kyc-logs"
+  })
+}
+
+resource "aws_iam_role_policy" "ecs_execution_jwt_secret_access" {
+  name = "${local.name_prefix}-ecs-execution-jwt-secret-access"
+  role = local.ecs_execution_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ReadJwtSecretsForContainerInjection"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          data.aws_secretsmanager_secret.jwt_private_key.arn,
+          data.aws_secretsmanager_secret.jwt_public_key.arn,
+          data.aws_secretsmanager_secret.jwt_public_keys_json.arn
+        ]
+      }
+    ]
   })
 }
 
@@ -446,6 +482,37 @@ resource "aws_ecs_task_definition" "payments" {
         {
           name  = "KYC_DOCUMENTS_BUCKET"
           value = var.kyc_documents_bucket_name
+        },
+        {
+          name  = "JWT_ALGORITHM"
+          value = "RS256"
+        },
+        {
+          name  = "JWT_ISSUER"
+          value = "sentinelpay-payments-api"
+        },
+        {
+          name  = "JWT_EXP_MINUTES"
+          value = "60"
+        },
+        {
+          name  = "JWT_ACTIVE_KID"
+          value = "dev-key-1"
+        }
+      ]
+
+      secrets = [
+        {
+          name      = "JWT_PRIVATE_KEY_PEM"
+          valueFrom = data.aws_secretsmanager_secret.jwt_private_key.arn
+        },
+        {
+          name      = "JWT_PUBLIC_KEY_PEM"
+          valueFrom = data.aws_secretsmanager_secret.jwt_public_key.arn
+        },
+        {
+          name      = "JWT_PUBLIC_KEYS_JSON"
+          valueFrom = data.aws_secretsmanager_secret.jwt_public_keys_json.arn
         }
       ]
 
@@ -465,6 +532,10 @@ resource "aws_ecs_task_definition" "payments" {
       }
     }
   ])
+
+  depends_on = [
+    aws_iam_role_policy.ecs_execution_jwt_secret_access
+  ]
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-payments-task"
@@ -519,6 +590,29 @@ resource "aws_ecs_task_definition" "kyc" {
         {
           name  = "KYC_DOCUMENTS_BUCKET"
           value = var.kyc_documents_bucket_name
+        },
+        {
+          name  = "JWT_ALGORITHM"
+          value = "RS256"
+        },
+        {
+          name  = "JWT_ISSUER"
+          value = "sentinelpay-payments-api"
+        },
+        {
+          name  = "JWT_ACTIVE_KID"
+          value = "dev-key-1"
+        }
+      ]
+
+      secrets = [
+        {
+          name      = "JWT_PUBLIC_KEY_PEM"
+          valueFrom = data.aws_secretsmanager_secret.jwt_public_key.arn
+        },
+        {
+          name      = "JWT_PUBLIC_KEYS_JSON"
+          valueFrom = data.aws_secretsmanager_secret.jwt_public_keys_json.arn
         }
       ]
 
@@ -538,6 +632,10 @@ resource "aws_ecs_task_definition" "kyc" {
       }
     }
   ])
+
+  depends_on = [
+    aws_iam_role_policy.ecs_execution_jwt_secret_access
+  ]
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-kyc-task"
