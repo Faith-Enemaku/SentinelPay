@@ -415,7 +415,7 @@ resource "aws_ecs_task_definition" "payments" {
   container_definitions = jsonencode([
     {
       name      = "payments-api"
-      image     = local.payments_image
+      image     = var.payments_image_uri
       essential = true
 
       portMappings = [
@@ -488,7 +488,7 @@ resource "aws_ecs_task_definition" "kyc" {
   container_definitions = jsonencode([
     {
       name      = "kyc-api"
-      image     = local.kyc_image
+      image     = var.kyc_image_uri
       essential = true
 
       portMappings = [

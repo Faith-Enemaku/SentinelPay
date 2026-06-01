@@ -103,7 +103,7 @@ resource "aws_iam_role" "github_actions_deploy" {
 
 resource "aws_iam_policy" "github_actions_deploy_limited" {
   name        = "${local.name_prefix}-github-actions-deploy-policy"
-  description = "Limited deployment permissions for SentinelPay GitHub Actions."
+  description = "Deployment permissions for SentinelPay GitHub Actions."
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -117,15 +117,61 @@ resource "aws_iam_policy" "github_actions_deploy_limited" {
         Resource = "*"
       },
       {
-        Sid    = "AllowEcsDeploymentReadiness"
+        Sid    = "AllowTerraformStateBackendAccess"
         Effect = "Allow"
         Action = [
-          "ecs:DescribeClusters",
-          "ecs:DescribeServices",
-          "ecs:DescribeTaskDefinition",
-          "ecs:ListClusters",
-          "ecs:ListServices",
-          "ecs:ListTaskDefinitions"
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketVersioning",
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:DeleteObject"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowECRBuildPushAndImageRead"
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:CreateRepository",
+          "ecr:DescribeRepositories",
+          "ecr:DescribeImages",
+          "ecr:PutLifecyclePolicy",
+          "ecr:PutImageScanningConfiguration",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowInfrastructureDeployment"
+        Effect = "Allow"
+        Action = [
+          "ec2:*",
+          "elasticloadbalancing:*",
+          "ecs:*",
+          "logs:*",
+          "cloudwatch:*",
+          "iam:*",
+          "kms:*",
+          "secretsmanager:*",
+          "s3:*",
+          "rds:*",
+          "elasticache:*",
+          "wafv2:*",
+          "cloudtrail:*",
+          "guardduty:*",
+          "securityhub:*",
+          "config:*",
+          "sns:*",
+          "events:*",
+          "application-autoscaling:*"
         ]
         Resource = "*"
       }

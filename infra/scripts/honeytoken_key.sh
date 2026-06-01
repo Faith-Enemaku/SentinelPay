@@ -5,7 +5,7 @@ USER_NAME="${1:-}"
 SECRET_NAME="${2:-}"
 
 if [ -z "$USER_NAME" ] || [ -z "$SECRET_NAME" ]; then
-  echo "Usage: ./scripts/create_honeytoken_key.sh <iam-user-name> <secrets-manager-secret-name>"
+  echo "Usage: ./scripts/honeytoken_key.sh <iam-user-name> <secrets-manager-secret-name>"
   exit 1
 fi
 

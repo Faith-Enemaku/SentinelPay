@@ -1,0 +1,441 @@
+name: SentinelPay Security Gates
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+  pull-requests: write
+  issues: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  TF_ROOT: infra/dev
+  OPA_POLICY_PATH: infra/policies/terraform
+
+  TF_VAR_project_name: ${{ vars.PROJECT_NAME }}
+  TF_VAR_environment: ${{ vars.ENVIRONMENT }}
+  TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+  TF_VAR_vpc_cidr: ${{ vars.VPC_CIDR }}
+  TF_VAR_availability_zones: ${{ vars.AVAILABILITY_ZONES }}
+  TF_VAR_public_subnet_cidrs: ${{ vars.PUBLIC_SUBNET_CIDRS }}
+  TF_VAR_private_subnet_cidrs: ${{ vars.PRIVATE_SUBNET_CIDRS }}
+  TF_VAR_github_owner: ${{ vars.REPO_OWNER }}
+  TF_VAR_github_repo: ${{ vars.REPO_NAME }}
+  TF_VAR_github_branch: ${{ vars.REPO_BRANCH }}
+  TF_VAR_enable_nat_gateway: ${{ vars.ENABLE_NAT_GATEWAY }}
+  TF_VAR_enable_rds: ${{ vars.ENABLE_RDS }}
+  TF_VAR_enable_elasticache: ${{ vars.ENABLE_ELASTICACHE }}
+  TF_VAR_enable_execute_command: ${{ vars.ENABLE_EXECUTE_COMMAND }}
+  TF_VAR_payments_desired_count: ${{ vars.PAYMENTS_DESIRED_COUNT }}
+  TF_VAR_kyc_desired_count: ${{ vars.KYC_DESIRED_COUNT }}
+  TF_VAR_db_instance_class: ${{ vars.DB_INSTANCE_CLASS }}
+  TF_VAR_cache_node_type: ${{ vars.CACHE_NODE_TYPE }}
+  TF_VAR_waf_rate_limit: ${{ vars.WAF_RATE_LIMIT }}
+  TF_VAR_log_retention_days: ${{ vars.LOG_RETENTION_DAYS }}
+  TF_VAR_cpu_architecture: ${{ vars.CPU_ARCHITECTURE }}
+  TF_VAR_allowed_http_cidrs: ${{ vars.ALLOWED_HTTP_CIDRS }}
+  TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+
+jobs:
+  gitleaks:
+    name: Gitleaks Secret Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  semgrep:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: |
+          python -m pip install --upgrade pip
+          pip install semgrep
+
+      - name: Run Semgrep
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/secrets \
+            --config p/owasp-top-ten \
+            --severity ERROR \
+            --error \
+            --exclude ".terraform" \
+            --exclude "docs/scans" \
+            .
+
+  bandit:
+    name: Bandit Python Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit
+
+      - name: Run Bandit
+        run: |
+          bandit -r . \
+            -x "./.git,./.github,./.terraform,./infra/dev/.terraform,./docs/scans" \
+            -lll \
+            -iii
+
+  trivy_fs_iac:
+    name: Trivy Filesystem and IaC Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          skip-dirs: docs/scans,infra/dev/.terraform,.terraform
+
+  iac_static_gates:
+    name: Checkov and tfsec IaC Gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python for Checkov
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Checkov
+        run: |
+          python -m pip install --upgrade pip
+          pip install checkov
+
+      - name: Run Checkov on Terraform code
+        run: |
+          checkov -d infra \
+            --framework terraform \
+            --quiet \
+            --hard-fail-on CRITICAL \
+            --soft-fail-on LOW,MEDIUM,HIGH
+
+      - name: Run tfsec on Terraform code
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra
+          soft_fail: false
+          additional_args: --minimum-severity CRITICAL
+
+  container_build_scan_sign:
+    name: Build, Scan and Sign Container Images
+    runs-on: ubuntu-latest
+
+    outputs:
+      payments_image: ${{ steps.image_names.outputs.payments_image }}
+      kyc_image: ${{ steps.image_names.outputs.kyc_image }}
+
+    env:
+      PAYMENTS_CONTEXT: ./services/payments-api
+      KYC_CONTEXT: ./services/kyc-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Log in to Amazon ECR
+        id: login_ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Prepare ECR image names
+        id: image_names
+        env:
+          ECR_REGISTRY: ${{ steps.login_ecr.outputs.registry }}
+        run: |
+          PAYMENTS_REPOSITORY=$(echo "${{ vars.PROJECT_NAME }}-${{ vars.ENVIRONMENT }}-payments-api" | tr '[:upper:]' '[:lower:]')
+          KYC_REPOSITORY=$(echo "${{ vars.PROJECT_NAME }}-${{ vars.ENVIRONMENT }}-kyc-api" | tr '[:upper:]' '[:lower:]')
+
+          echo "payments_repository=${PAYMENTS_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "kyc_repository=${KYC_REPOSITORY}" >> "$GITHUB_OUTPUT"
+
+          echo "payments_image=${ECR_REGISTRY}/${PAYMENTS_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "kyc_image=${ECR_REGISTRY}/${KYC_REPOSITORY}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Create ECR repositories if missing
+        run: |
+          aws ecr describe-repositories \
+            --repository-names "${{ steps.image_names.outputs.payments_repository }}" \
+            --region "${{ env.AWS_REGION }}" \
+          || aws ecr create-repository \
+            --repository-name "${{ steps.image_names.outputs.payments_repository }}" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256 \
+            --region "${{ env.AWS_REGION }}"
+
+          aws ecr describe-repositories \
+            --repository-names "${{ steps.image_names.outputs.kyc_repository }}" \
+            --region "${{ env.AWS_REGION }}" \
+          || aws ecr create-repository \
+            --repository-name "${{ steps.image_names.outputs.kyc_repository }}" \
+            --image-scanning-configuration scanOnPush=true \
+            --encryption-configuration encryptionType=AES256 \
+            --region "${{ env.AWS_REGION }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push payments image to ECR
+        id: build_payments
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.PAYMENTS_CONTEXT }}
+          push: true
+          tags: ${{ steps.image_names.outputs.payments_image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=SentinelPay payments API
+
+      - name: Build and push KYC image to ECR
+        id: build_kyc
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ env.KYC_CONTEXT }}
+          push: true
+          tags: ${{ steps.image_names.outputs.kyc_image }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=SentinelPay KYC API
+
+      - name: Trivy scan payments image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ steps.image_names.outputs.payments_image }}
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Trivy scan KYC image
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ steps.image_names.outputs.kyc_image }}
+          scanners: vuln,secret,misconfig
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.0
+
+      - name: Sign payments image with Cosign keyless
+        run: |
+          cosign sign --yes "${{ steps.image_names.outputs.payments_image }}@${{ steps.build_payments.outputs.digest }}"
+
+      - name: Sign KYC image with Cosign keyless
+        run: |
+          cosign sign --yes "${{ steps.image_names.outputs.kyc_image }}@${{ steps.build_kyc.outputs.digest }}"
+
+  terraform_plan_apply_zap:
+    name: Terraform Plan, OPA, Apply and ZAP Baseline
+    runs-on: ubuntu-latest
+    needs:
+      - gitleaks
+      - semgrep
+      - bandit
+      - trivy_fs_iac
+      - iac_static_gates
+      - container_build_scan_sign
+
+    env:
+      TF_VAR_payments_image_uri: ${{ needs.container_build_scan_sign.outputs.payments_image }}
+      TF_VAR_kyc_image_uri: ${{ needs.container_build_scan_sign.outputs.kyc_image }}
+
+    defaults:
+      run:
+        working-directory: ${{ env.TF_ROOT }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Confirm AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform format check
+        run: terraform fmt -check -recursive ..
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -out=tfplan
+
+      - name: Export Terraform plan to JSON
+        run: terraform show -json tfplan > tfplan.json
+
+      - name: Set up Python for Checkov
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Checkov CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install checkov
+
+      - name: Run Checkov on Terraform plan
+        run: |
+          checkov -f tfplan.json \
+            --framework terraform_plan \
+            --quiet \
+            --hard-fail-on CRITICAL \
+            --soft-fail-on LOW,MEDIUM,HIGH
+
+      - name: Install Conftest
+        run: |
+          wget https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz
+          tar xzf conftest_0.56.0_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+          conftest --version
+
+      - name: Run OPA policy checks
+        run: conftest test tfplan.json --policy ../policies/terraform
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get ALB URL for ZAP
+        id: zap_target
+        run: |
+          ALB_DNS=$(terraform output -raw alb_dns_name)
+          ALB_DNS="${ALB_DNS#http://}"
+          ALB_DNS="${ALB_DNS#https://}"
+          echo "url=http://${ALB_DNS}" >> "$GITHUB_OUTPUT"
+          echo "ZAP target: http://${ALB_DNS}"
+
+      - name: Wait for application endpoint
+        run: |
+          TARGET="${{ steps.zap_target.outputs.url }}"
+          for i in {1..30}; do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET/health" || true)
+            if [[ "$CODE" =~ ^(200|301|302|401|403|404)$ ]]; then
+              echo "Application endpoint is reachable with HTTP $CODE"
+              exit 0
+            fi
+            echo "Waiting for endpoint... attempt $i, HTTP $CODE"
+            sleep 20
+          done
+          echo "Application endpoint was not reachable in time."
+          exit 1
+
+      - name: Run ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          docker_name: ghcr.io/zaproxy/zaproxy:stable
+          target: ${{ steps.zap_target.outputs.url }}
+          cmd_options: '-a -I -J zap_report.json'
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap_baseline_report
+
+      - name: Evaluate ZAP high-risk alerts
+        id: zap_eval
+        working-directory: ${{ github.workspace }}
+        run: |
+          REPORT_PATH=$(find . -name "zap_report.json" | head -n 1)
+
+          if [ -z "$REPORT_PATH" ]; then
+            echo "ZAP JSON report not found."
+            echo "high_count=999" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Using ZAP report: $REPORT_PATH"
+
+          HIGH_COUNT=$(jq '[.site[].alerts[]? | select(.riskdesc | startswith("High"))] | length' "$REPORT_PATH")
+
+          echo "High-risk ZAP alerts found: ${HIGH_COUNT}"
+          echo "high_count=${HIGH_COUNT}" >> "$GITHUB_OUTPUT"
+
+      - name: Destroy environment if ZAP high-risk alerts are found
+        if: always() && steps.zap_eval.outputs.high_count != '0'
+        run: terraform destroy -auto-approve
+
+      - name: Optional Terraform destroy after ZAP
+        if: always() && vars.DESTROY_AFTER_ZAP == 'true' && steps.zap_eval.outputs.high_count == '0'
+        run: terraform destroy -auto-approve
+
+      - name: Fail pipeline if ZAP high-risk alerts are found
+        if: always() && steps.zap_eval.outputs.high_count != '0'
+        run: |
+          echo "Blocking pipeline because ZAP found High-risk alerts."
+          exit 1

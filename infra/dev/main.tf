@@ -42,6 +42,9 @@ module "compute_edge" {
   project_name = var.project_name
   environment  = var.environment
 
+  payments_image_uri = var.payments_image_uri
+  kyc_image_uri      = var.kyc_image_uri
+
   vpc_id             = module.network.vpc_id
   vpc_cidr           = var.vpc_cidr
   public_subnet_ids  = module.network.public_subnet_ids

@@ -170,3 +170,13 @@ variable "kyc_path_patterns" {
     "/documents/*"
   ]
 }
+
+variable "payments_image_uri" {
+  description = "Container image URI for the payments API."
+  type        = string
+}
+
+variable "kyc_image_uri" {
+  description = "Container image URI for the KYC API."
+  type        = string
+}

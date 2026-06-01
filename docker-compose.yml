@@ -24,15 +24,16 @@ services:
     ports:
       - "8001:8001"
     environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8001"
+      FLASK_DEBUG: "false"
       DATABASE_URL: postgresql://sentinel:sentinel123@postgres:5432/sentinelpay
       REDIS_URL: redis://redis:6379/0
       JWT_ISSUER: sentinelpay-payments-api
       JWT_ACTIVE_KID: dev-key-1
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key.pem
       JWT_PUBLIC_KEYS_PATH: /run/secrets/jwt_public_keys.json
-      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
-      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_REGION: af-south-1
+      AWS_REGION: eu-west-2
       KYC_BUCKET: sentinelpay-kyc-documents
       WEBHOOK_TIMEOUT: "10"
       ENVIRONMENT: development
@@ -50,13 +51,14 @@ services:
     ports:
       - "8002:8002"
     environment:
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "8002"
+      FLASK_DEBUG: "false"
       DATABASE_URL: postgresql://sentinel:sentinel123@postgres:5432/sentinelpay
       REDIS_URL: redis://redis:6379/1
       JWT_ISSUER: sentinelpay-payments-api
       JWT_PUBLIC_KEYS_PATH: /run/secrets/jwt_public_keys.json
-      AWS_ACCESS_KEY_ID: AKIAIOSFODNN7EXAMPLE
-      AWS_SECRET_ACCESS_KEY: wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-      AWS_REGION: af-south-1
+      AWS_REGION: eu-west-2
       KYC_BUCKET: sentinelpay-kyc-documents
       BVN_LOOKUP_URL: https://api.mock-cbn.local/bvn
       ENVIRONMENT: development

@@ -1,5 +1,7 @@
 """SentinelPay Payments API — main entrypoint."""
+import logging
 import os
+
 from flask import Flask, jsonify
 
 from app.routes.auth import auth_bp
@@ -10,10 +12,20 @@ from app.routes.webhooks import webhooks_bp
 from app.routes.admin import admin_bp
 
 
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
+
+
 def create_app():
     app = Flask(__name__)
-    app.config["JWT_SECRET"] = os.environ.get("JWT_SECRET", "sentinelpay-dev-secret")
+
     app.config["ENVIRONMENT"] = os.environ.get("ENVIRONMENT", "development")
+
+    # Keep JWT secret optional for backwards compatibility, but do not hardcode a default secret.
+    app.config["JWT_SECRET"] = os.environ.get("JWT_SECRET")
 
     app.register_blueprint(auth_bp, url_prefix="/v1/auth")
     app.register_blueprint(accounts_bp, url_prefix="/v1/accounts")
@@ -27,18 +39,18 @@ def create_app():
         return jsonify({"status": "ok", "service": "payments-api"})
 
     @app.errorhandler(Exception)
-    def handle_exception(e):
-        # V-APP-09: Verbose error response leaks stack details
-        import traceback
-        return jsonify({
-            "error": str(e),
-            "type": type(e).__name__,
-            "trace": traceback.format_exc()
-        }), 500
+    def handle_exception(error):
+        logging.exception("Unhandled exception in payments-api")
+        return jsonify({"error": "Internal server error"}), 500
 
     return app
 
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(host="0.0.0.0", port=8001, debug=True)
+
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", "8001"))
+    debug = env_bool("FLASK_DEBUG", False)
+
+    app.run(host=host, port=port, debug=debug)
