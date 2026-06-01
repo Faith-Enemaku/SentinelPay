@@ -136,8 +136,7 @@ jobs:
           exit-code: "1"
           format: table
           skip-dirs: docs/scans,infra/dev/.terraform,.terraform
-          trivy-config: "" 
-          additional-args: --skip-check AWS-0054,AWS-0104 
+          trivyignores: .trivyignore.yaml
 
   iac_static_gates:
     name: Checkov and tfsec IaC Gates
@@ -173,7 +172,6 @@ jobs:
           soft_fail: false
           additional_args: >- 
             --minimum-severity CRITICAL
-            --panic 
             --exclude aws-ec2-no-public-egress-sgr,aws-elb-http-not-used
 
   container_build_scan_sign:
@@ -273,8 +271,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
-          trivy-config: "" 
-          additional-args: --skip-check AWS-0054,AWS-0104
+          
 
       - name: Trivy scan KYC image
         uses: aquasecurity/trivy-action@v0.36.0
@@ -285,8 +282,7 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           format: table
-          trivy-config: "" 
-          additional-args: --skip-check AWS-0054,AWS-0104
+         
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.0
