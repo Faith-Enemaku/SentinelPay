@@ -138,6 +138,8 @@ resource "aws_iam_policy" "github_actions_deploy_limited" {
           "ecr:DescribeRepositories",
           "ecr:DescribeImages",
           "ecr:PutLifecyclePolicy",
+          "ecr:GetLifecyclePolicy",
+          "ecr:DeleteLifecyclePolicy",
           "ecr:PutImageScanningConfiguration",
           "ecr:BatchCheckLayerAvailability",
           "ecr:InitiateLayerUpload",
@@ -145,7 +147,11 @@ resource "aws_iam_policy" "github_actions_deploy_limited" {
           "ecr:CompleteLayerUpload",
           "ecr:PutImage",
           "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:TagResource",
+          "ecr:UntagResource",
+          "ecr:ListTagsForResource",
+          "ecr:DeleteRepository"
         ]
         Resource = "*"
       },

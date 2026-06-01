@@ -73,6 +73,7 @@ resource "aws_secretsmanager_secret" "database_credentials" {
   name        = "${local.name_prefix}/database/credentials"
   description = "Database credentials for ${local.name_prefix}"
   kms_key_id  = aws_kms_key.data.arn
+  recovery_window_in_days = 0
 
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-database-credentials"

@@ -222,6 +222,87 @@ data "aws_iam_policy_document" "cloudtrail_bucket_policy" {
       values   = [local.cloudtrail_arn]
     }
   }
+
+  statement {
+    sid = "AWSConfigBucketPermissionsCheck"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:GetBucketAcl"
+    ]
+
+    resources = [
+      aws_s3_bucket.cloudtrail_logs[0].arn
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
+    sid = "AWSConfigBucketExistenceCheck"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:ListBucket"
+    ]
+
+    resources = [
+      aws_s3_bucket.cloudtrail_logs[0].arn
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
+    sid = "AWSConfigBucketDelivery"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:PutObject"
+    ]
+
+    resources = [
+      "${aws_s3_bucket.cloudtrail_logs[0].arn}/config/AWSLogs/${local.account_id}/Config/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "cloudtrail_logs" {
@@ -328,12 +409,13 @@ data "aws_iam_policy_document" "config_delivery" {
   count = var.enable_config && var.enable_cloudtrail ? 1 : 0
 
   statement {
-    sid = "AllowConfigDeliveryToLogBucket"
+    sid = "AllowConfigDeliveryBucketChecks"
 
     effect = "Allow"
 
     actions = [
       "s3:GetBucketAcl",
+      "s3:GetBucketLocation",
       "s3:ListBucket"
     ]
 
@@ -348,7 +430,8 @@ data "aws_iam_policy_document" "config_delivery" {
     effect = "Allow"
 
     actions = [
-      "s3:PutObject"
+      "s3:PutObject",
+      "s3:PutObjectAcl"
     ]
 
     resources = [
@@ -400,6 +483,9 @@ resource "aws_config_delivery_channel" "main" {
   }
 
   depends_on = [
+    aws_s3_bucket_policy.cloudtrail_logs,
+    aws_iam_role_policy.config_delivery,
+    aws_iam_role_policy_attachment.config_managed,
     aws_config_configuration_recorder.main
   ]
 }
