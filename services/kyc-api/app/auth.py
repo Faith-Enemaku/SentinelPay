@@ -4,6 +4,7 @@ import json
 import os
 from functools import wraps
 from pathlib import Path
+from typing import Optional
 
 import jwt
 from flask import jsonify, request
@@ -12,14 +13,16 @@ JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "RS256")
 JWT_ISSUER = os.environ.get("JWT_ISSUER", "sentinelpay-payments-api")
 JWT_ACTIVE_KID = os.environ.get("JWT_ACTIVE_KID", "dev-key-1")
 
+# Local development path
 JWT_PUBLIC_KEYS_PATH = os.environ.get("JWT_PUBLIC_KEYS_PATH")
 
+# ECS/Secrets Manager injected values
 JWT_PUBLIC_KEY_PEM = os.environ.get("JWT_PUBLIC_KEY_PEM")
 JWT_PUBLIC_KEYS_JSON = os.environ.get("JWT_PUBLIC_KEYS_JSON")
 
 
-def normalise_pem(value):
-    """Convert escaped newlines from ECS/Secrets Manager back into real PEM newlines."""
+def normalise_pem(value: Optional[str]) -> Optional[str]:
+    """Convert escaped newlines from env vars back into real PEM newlines."""
     if not value:
         return None
 
@@ -31,7 +34,7 @@ def normalise_pem(value):
     return value
 
 
-def read_file(path):
+def read_file(path: Optional[str]) -> Optional[str]:
     """Read a local file when running outside ECS."""
     if not path:
         return None
@@ -45,14 +48,14 @@ def read_file(path):
 
 
 def load_public_keys() -> dict:
-    """
-    Load public keys used to verify JWTs by key ID.
+    """Load public keys used to verify JWTs by key ID.
 
-    Priority:
-    1. ECS/Secrets Manager injected env var: JWT_PUBLIC_KEYS_JSON
-    2. ECS/Secrets Manager injected env var: JWT_PUBLIC_KEY_PEM
-    3. Local development file path: JWT_PUBLIC_KEYS_PATH
+    Supported options:
+    1. ECS/Secrets Manager: JWT_PUBLIC_KEYS_JSON
+    2. ECS/Secrets Manager: JWT_PUBLIC_KEY_PEM
+    3. Local development: JWT_PUBLIC_KEYS_PATH
     """
+
     if JWT_PUBLIC_KEYS_JSON:
         try:
             parsed_keys = json.loads(JWT_PUBLIC_KEYS_JSON)

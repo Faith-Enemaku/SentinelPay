@@ -11,7 +11,7 @@ from argon2 import PasswordHasher, Type
 from argon2.exceptions import VerificationError, VerifyMismatchError
 from flask import jsonify, request
 
-JWT_ALGORITHM = os.environ.get("JWT_ALGORITHM", "RS256")
+JWT_ALGORITHM = "RS256"
 JWT_ISSUER = os.environ.get("JWT_ISSUER", "sentinelpay-payments-api")
 JWT_EXP_MINUTES = int(os.environ.get("JWT_EXP_MINUTES", "60"))
 JWT_ACTIVE_KID = os.environ.get("JWT_ACTIVE_KID", "dev-key-1")
@@ -24,105 +24,39 @@ JWT_PUBLIC_KEY_PEM = os.environ.get("JWT_PUBLIC_KEY_PEM")
 JWT_PUBLIC_KEYS_JSON = os.environ.get("JWT_PUBLIC_KEYS_JSON")
 
 
-def normalise_pem(value):
-    """Convert escaped newlines from ECS/Secrets Manager back into real PEM newlines."""
-    if not value:
-        return None
-
-    value = value.strip()
-
-    if "\\n" in value:
-        value = value.replace("\\n", "\n")
-
-    return value
-
-
-def read_file(path):
-    """Read a local file when running outside ECS."""
-    if not path:
-        return None
-
-    file_path = Path(path)
-
-    if not file_path.exists():
-        return None
-
-    return file_path.read_text(encoding="utf-8")
-
-
 def load_private_key() -> str:
+    """Load the active private key used to sign JWTs.
+
+    Local development can use JWT_PRIVATE_KEY_PATH.
+    ECS/Fargate can use JWT_PRIVATE_KEY_PEM injected from AWS Secrets Manager.
     """
-    Load the active private key used to sign JWTs.
+    if JWT_PRIVATE_KEY_PEM:
+        return JWT_PRIVATE_KEY_PEM
 
-    Priority:
-    1. ECS/Secrets Manager injected env var: JWT_PRIVATE_KEY_PEM
-    2. Local development file path: JWT_PRIVATE_KEY_PATH
-    """
-    private_key = normalise_pem(JWT_PRIVATE_KEY_PEM)
+    if JWT_PRIVATE_KEY_PATH:
+        return Path(JWT_PRIVATE_KEY_PATH).read_text()
 
-    if private_key:
-        return private_key
-
-    private_key = normalise_pem(read_file(JWT_PRIVATE_KEY_PATH))
-
-    if private_key:
-        return private_key
-
-    raise RuntimeError(
-        "JWT private key not configured. Set JWT_PRIVATE_KEY_PEM for ECS "
-        "or JWT_PRIVATE_KEY_PATH for local development."
-    )
+    raise RuntimeError("JWT_PRIVATE_KEY_PEM or JWT_PRIVATE_KEY_PATH must be set")
 
 
 def load_public_keys() -> dict:
-    """
-    Load public keys used to verify JWTs by key ID.
+    """Load public keys used to verify JWTs by key ID.
 
-    Priority:
-    1. ECS/Secrets Manager injected env var: JWT_PUBLIC_KEYS_JSON
-    2. ECS/Secrets Manager injected env var: JWT_PUBLIC_KEY_PEM
-    3. Local development file path: JWT_PUBLIC_KEYS_PATH
+    Local development can use JWT_PUBLIC_KEYS_PATH.
+    ECS/Fargate can use JWT_PUBLIC_KEYS_JSON injected from AWS Secrets Manager.
+    JWT_PUBLIC_KEY_PEM is supported as a fallback for a single active key.
     """
     if JWT_PUBLIC_KEYS_JSON:
-        try:
-            parsed_keys = json.loads(JWT_PUBLIC_KEYS_JSON)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("JWT_PUBLIC_KEYS_JSON is not valid JSON") from exc
+        return json.loads(JWT_PUBLIC_KEYS_JSON)
 
-        if not isinstance(parsed_keys, dict):
-            raise RuntimeError("JWT_PUBLIC_KEYS_JSON must be a JSON object")
+    if JWT_PUBLIC_KEYS_PATH:
+        return json.loads(Path(JWT_PUBLIC_KEYS_PATH).read_text())
 
-        return {
-            kid: normalise_pem(public_key)
-            for kid, public_key in parsed_keys.items()
-        }
-
-    public_key = normalise_pem(JWT_PUBLIC_KEY_PEM)
-
-    if public_key:
-        return {
-            JWT_ACTIVE_KID: public_key
-        }
-
-    public_keys_file = read_file(JWT_PUBLIC_KEYS_PATH)
-
-    if public_keys_file:
-        try:
-            parsed_keys = json.loads(public_keys_file)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("JWT public keys file is not valid JSON") from exc
-
-        if not isinstance(parsed_keys, dict):
-            raise RuntimeError("JWT public keys file must contain a JSON object")
-
-        return {
-            kid: normalise_pem(public_key)
-            for kid, public_key in parsed_keys.items()
-        }
+    if JWT_PUBLIC_KEY_PEM:
+        return {JWT_ACTIVE_KID: JWT_PUBLIC_KEY_PEM}
 
     raise RuntimeError(
-        "JWT public keys not configured. Set JWT_PUBLIC_KEYS_JSON, "
-        "JWT_PUBLIC_KEY_PEM, or JWT_PUBLIC_KEYS_PATH."
+        "JWT_PUBLIC_KEYS_JSON, JWT_PUBLIC_KEYS_PATH, or JWT_PUBLIC_KEY_PEM must be set"
     )
 
 
