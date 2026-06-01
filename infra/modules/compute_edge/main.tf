@@ -13,6 +13,10 @@ data "aws_secretsmanager_secret" "jwt_public_keys_json" {
   name = "${local.name_prefix}/jwt/public-keys-json"
 }
 
+data "aws_secretsmanager_secret" "internal_signing_secret" {
+  name = "${local.name_prefix}/internal/signing-secret"
+}
+
 locals {
   name_prefix = "${var.project_name}-${var.environment}"
 
@@ -131,14 +135,14 @@ resource "aws_cloudwatch_log_group" "kyc" {
 }
 
 resource "aws_iam_role_policy" "ecs_execution_jwt_secret_access" {
-  name = "${local.name_prefix}-ecs-execution-jwt-secret-access"
+  name = "${local.name_prefix}-ecs-execution-app-secret-access"
   role = local.ecs_execution_role_name
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "ReadJwtSecrets"
+        Sid    = "ReadAppSecrets"
         Effect = "Allow"
         Action = [
           "secretsmanager:GetSecretValue",
@@ -147,7 +151,8 @@ resource "aws_iam_role_policy" "ecs_execution_jwt_secret_access" {
         Resource = [
           data.aws_secretsmanager_secret.jwt_private_key.arn,
           data.aws_secretsmanager_secret.jwt_public_key.arn,
-          data.aws_secretsmanager_secret.jwt_public_keys_json.arn
+          data.aws_secretsmanager_secret.jwt_public_keys_json.arn,
+          data.aws_secretsmanager_secret.internal_signing_secret.arn
         ]
       }
     ]
@@ -473,6 +478,10 @@ resource "aws_ecs_task_definition" "payments" {
           value = data.aws_region.current.region
         },
         {
+          name  = "APP_HOST"
+          value = "0.0.0.0"
+        },
+        {
           name  = "PORT"
           value = tostring(var.payments_container_port)
         },
@@ -498,6 +507,10 @@ resource "aws_ecs_task_definition" "payments" {
         {
           name      = "JWT_PUBLIC_KEYS_JSON"
           valueFrom = data.aws_secretsmanager_secret.jwt_public_keys_json.arn
+        },
+        {
+          name      = "INTERNAL_SIGNING_SECRET"
+          valueFrom = data.aws_secretsmanager_secret.internal_signing_secret.arn
         }
       ]
 
@@ -565,6 +578,10 @@ resource "aws_ecs_task_definition" "kyc" {
           value = data.aws_region.current.region
         },
         {
+          name  = "APP_HOST"
+          value = "0.0.0.0"
+        },
+        {
           name  = "PORT"
           value = tostring(var.kyc_container_port)
         },
@@ -586,6 +603,10 @@ resource "aws_ecs_task_definition" "kyc" {
         {
           name      = "JWT_PUBLIC_KEYS_JSON"
           valueFrom = data.aws_secretsmanager_secret.jwt_public_keys_json.arn
+        },
+        {
+          name      = "INTERNAL_SIGNING_SECRET"
+          valueFrom = data.aws_secretsmanager_secret.internal_signing_secret.arn
         }
       ]
 
