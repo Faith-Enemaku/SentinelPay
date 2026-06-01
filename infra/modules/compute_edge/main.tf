@@ -22,9 +22,9 @@ locals {
     ManagedBy   = "Terraform"
   }
 
-  payments_task_role_name      = element(split("/", var.payments_task_role_arn), length(split("/", var.payments_task_role_arn)) - 1)
-  kyc_task_role_name           = element(split("/", var.kyc_task_role_arn), length(split("/", var.kyc_task_role_arn)) - 1)
-  ecs_execution_role_name      = element(split("/", var.ecs_task_execution_role_arn), length(split("/", var.ecs_task_execution_role_arn)) - 1)
+  payments_task_role_name = element(split("/", var.payments_task_role_arn), length(split("/", var.payments_task_role_arn)) - 1)
+  kyc_task_role_name      = element(split("/", var.kyc_task_role_arn), length(split("/", var.kyc_task_role_arn)) - 1)
+  ecs_execution_role_name = element(split("/", var.ecs_task_execution_role_arn), length(split("/", var.ecs_task_execution_role_arn)) - 1)
 
   payments_image = "${aws_ecr_repository.payments.repository_url}:${var.payments_image_tag}"
   kyc_image      = "${aws_ecr_repository.kyc.repository_url}:${var.kyc_image_tag}"
