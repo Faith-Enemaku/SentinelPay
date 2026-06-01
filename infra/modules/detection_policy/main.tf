@@ -11,11 +11,12 @@ locals {
 
   name_prefix = lower("${var.project_name}-${var.environment}")
 
-  cloudtrail_name  = "${local.name_prefix}-trail"
-  log_bucket_name  = "${local.name_prefix}-cloudtrail-logs-${local.account_id}"
-  config_role_name = "${local.name_prefix}-aws-config-role"
-  honeytoken_name  = "${local.name_prefix}-honeytoken-user"
-  alert_topic_name = "${local.name_prefix}-security-alerts"
+  cloudtrail_name    = "${local.name_prefix}-trail"
+  log_bucket_name    = "${local.name_prefix}-cloudtrail-logs-${local.account_id}"
+  config_bucket_name = "${local.name_prefix}-config-logs-${local.account_id}"
+  config_role_name   = "${local.name_prefix}-aws-config-role"
+  honeytoken_name    = "${local.name_prefix}-honeytoken-user"
+  alert_topic_name   = "${local.name_prefix}-security-alerts"
 
   cloudtrail_arn = "arn:${local.partition}:cloudtrail:${local.region}:${local.account_id}:trail/${local.cloudtrail_name}"
 
@@ -141,6 +142,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail_logs" {
     noncurrent_version_expiration {
       noncurrent_days = 365
     }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
   }
 }
 
@@ -220,87 +225,6 @@ data "aws_iam_policy_document" "cloudtrail_bucket_policy" {
       test     = "StringEquals"
       variable = "aws:SourceArn"
       values   = [local.cloudtrail_arn]
-    }
-  }
-
-  statement {
-    sid = "AWSConfigBucketPermissionsCheck"
-
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["config.amazonaws.com"]
-    }
-
-    actions = [
-      "s3:GetBucketAcl"
-    ]
-
-    resources = [
-      aws_s3_bucket.cloudtrail_logs[0].arn
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "AWS:SourceAccount"
-      values   = [local.account_id]
-    }
-  }
-
-  statement {
-    sid = "AWSConfigBucketExistenceCheck"
-
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["config.amazonaws.com"]
-    }
-
-    actions = [
-      "s3:ListBucket"
-    ]
-
-    resources = [
-      aws_s3_bucket.cloudtrail_logs[0].arn
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "AWS:SourceAccount"
-      values   = [local.account_id]
-    }
-  }
-
-  statement {
-    sid = "AWSConfigBucketDelivery"
-
-    effect = "Allow"
-
-    principals {
-      type        = "Service"
-      identifiers = ["config.amazonaws.com"]
-    }
-
-    actions = [
-      "s3:PutObject"
-    ]
-
-    resources = [
-      "${aws_s3_bucket.cloudtrail_logs[0].arn}/config/AWSLogs/${local.account_id}/Config/*"
-    ]
-
-    condition {
-      test     = "StringEquals"
-      variable = "s3:x-amz-acl"
-      values   = ["bucket-owner-full-control"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "AWS:SourceAccount"
-      values   = [local.account_id]
     }
   }
 }
@@ -405,8 +329,244 @@ resource "aws_iam_role_policy_attachment" "config_managed" {
   policy_arn = "arn:${local.partition}:iam::aws:policy/service-role/AWS_ConfigRole"
 }
 
+resource "aws_s3_bucket" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = local.config_bucket_name
+
+  tags = merge(local.common_tags, {
+    Name    = local.config_bucket_name
+    Purpose = "aws-config-logs"
+  })
+}
+
+resource "aws_s3_bucket_versioning" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = aws_s3_bucket.config_logs[0].id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = aws_s3_bucket.config_logs[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = aws_s3_bucket.config_logs[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+
+    bucket_key_enabled = true
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = aws_s3_bucket.config_logs[0].id
+
+  rule {
+    id     = "expire-old-config-logs"
+    status = "Enabled"
+
+    filter {
+      prefix = ""
+    }
+
+    expiration {
+      days = 365
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 365
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+}
+
+data "aws_iam_policy_document" "config_bucket_policy" {
+  count = var.enable_config ? 1 : 0
+
+  statement {
+    sid = "DenyInsecureTransport"
+
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.config_logs[0].arn,
+      "${aws_s3_bucket.config_logs[0].arn}/*"
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+
+  statement {
+    sid = "AWSConfigBucketPermissionsCheck"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:GetBucketAcl"
+    ]
+
+    resources = [
+      aws_s3_bucket.config_logs[0].arn
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
+    sid = "AWSConfigBucketExistenceCheck"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:ListBucket"
+    ]
+
+    resources = [
+      aws_s3_bucket.config_logs[0].arn
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
+    sid = "AWSConfigBucketDelivery"
+
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["config.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:PutObject"
+    ]
+
+    resources = [
+      "${aws_s3_bucket.config_logs[0].arn}/AWSLogs/${local.account_id}/Config/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+
+  statement {
+    sid = "AllowConfigRoleBucketChecks"
+
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.config[0].arn]
+    }
+
+    actions = [
+      "s3:GetBucketAcl",
+      "s3:GetBucketLocation",
+      "s3:ListBucket"
+    ]
+
+    resources = [
+      aws_s3_bucket.config_logs[0].arn
+    ]
+  }
+
+  statement {
+    sid = "AllowConfigRoleWriteObjects"
+
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.config[0].arn]
+    }
+
+    actions = [
+      "s3:PutObject",
+      "s3:PutObjectAcl"
+    ]
+
+    resources = [
+      "${aws_s3_bucket.config_logs[0].arn}/AWSLogs/${local.account_id}/Config/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "s3:x-amz-acl"
+      values   = ["bucket-owner-full-control"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "config_logs" {
+  count = var.enable_config ? 1 : 0
+
+  bucket = aws_s3_bucket.config_logs[0].id
+  policy = data.aws_iam_policy_document.config_bucket_policy[0].json
+}
+
 data "aws_iam_policy_document" "config_delivery" {
-  count = var.enable_config && var.enable_cloudtrail ? 1 : 0
+  count = var.enable_config ? 1 : 0
 
   statement {
     sid = "AllowConfigDeliveryBucketChecks"
@@ -420,7 +580,7 @@ data "aws_iam_policy_document" "config_delivery" {
     ]
 
     resources = [
-      aws_s3_bucket.cloudtrail_logs[0].arn
+      aws_s3_bucket.config_logs[0].arn
     ]
   }
 
@@ -435,7 +595,7 @@ data "aws_iam_policy_document" "config_delivery" {
     ]
 
     resources = [
-      "${aws_s3_bucket.cloudtrail_logs[0].arn}/config/AWSLogs/${local.account_id}/*"
+      "${aws_s3_bucket.config_logs[0].arn}/AWSLogs/${local.account_id}/Config/*"
     ]
 
     condition {
@@ -447,7 +607,7 @@ data "aws_iam_policy_document" "config_delivery" {
 }
 
 resource "aws_iam_role_policy" "config_delivery" {
-  count = var.enable_config && var.enable_cloudtrail ? 1 : 0
+  count = var.enable_config ? 1 : 0
 
   name   = "${local.name_prefix}-config-delivery"
   role   = aws_iam_role.config[0].id
@@ -472,18 +632,17 @@ resource "aws_config_configuration_recorder" "main" {
 }
 
 resource "aws_config_delivery_channel" "main" {
-  count = var.enable_config && var.enable_cloudtrail ? 1 : 0
+  count = var.enable_config ? 1 : 0
 
   name           = "${local.name_prefix}-config-delivery"
-  s3_bucket_name = aws_s3_bucket.cloudtrail_logs[0].bucket
-  s3_key_prefix  = "config"
+  s3_bucket_name = aws_s3_bucket.config_logs[0].bucket
 
   snapshot_delivery_properties {
     delivery_frequency = "TwentyFour_Hours"
   }
 
   depends_on = [
-    aws_s3_bucket_policy.cloudtrail_logs,
+    aws_s3_bucket_policy.config_logs,
     aws_iam_role_policy.config_delivery,
     aws_iam_role_policy_attachment.config_managed,
     aws_config_configuration_recorder.main
@@ -491,7 +650,7 @@ resource "aws_config_delivery_channel" "main" {
 }
 
 resource "aws_config_configuration_recorder_status" "main" {
-  count = var.enable_config && var.enable_cloudtrail ? 1 : 0
+  count = var.enable_config ? 1 : 0
 
   name       = aws_config_configuration_recorder.main[0].name
   is_enabled = true
