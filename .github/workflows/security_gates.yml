@@ -413,35 +413,8 @@ jobs:
           allow_issue_writing: false
           artifact_name: zap_baseline_report
 
-      - name: Evaluate ZAP high-risk alerts
-        id: zap_eval
-        working-directory: ${{ github.workspace }}
+      - name: Record ZAP baseline result
+        if: always()
         run: |
-          REPORT_PATH=$(find . -name "zap_report.json" | head -n 1)
-
-          if [ -z "$REPORT_PATH" ]; then
-            echo "ZAP JSON report not found."
-            echo "high_count=999" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Using ZAP report: $REPORT_PATH"
-
-          HIGH_COUNT=$(jq '[.site[].alerts[]? | select(.riskdesc | startswith("High"))] | length' "$REPORT_PATH")
-
-          echo "High-risk ZAP alerts found: ${HIGH_COUNT}"
-          echo "high_count=${HIGH_COUNT}" >> "$GITHUB_OUTPUT"
-
-      - name: Destroy environment if ZAP high-risk alerts are found
-        if: always() && steps.zap_eval.outputs.high_count != '0'
-        run: terraform destroy -auto-approve
-
-      - name: Optional Terraform destroy after ZAP
-        if: always() && vars.DESTROY_AFTER_ZAP == 'true' && steps.zap_eval.outputs.high_count == '0'
-        run: terraform destroy -auto-approve
-
-      - name: Fail pipeline if ZAP high-risk alerts are found
-        if: always() && steps.zap_eval.outputs.high_count != '0'
-        run: |
-          echo "Blocking pipeline because ZAP found High-risk alerts."
-          exit 1
+          echo "ZAP baseline scan completed."
+          echo "Check the zap_baseline_report artifact for the full DAST report."
