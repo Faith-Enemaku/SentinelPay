@@ -51,12 +51,18 @@ def upload_document():
 @documents_bp.route("/<path:key>", methods=["GET"])
 @require_auth
 def get_document(key):
-    """Fetch a previously uploaded document.
+    """Fetch a document belonging to the authenticated user only."""
+    user_prefix = f"users/{request.current_user_id}/"
 
-    No ownership check on the key. Identical pattern to V-APP-03 IDOR.
-    """
+    if not key.startswith(user_prefix):
+        return jsonify({"error": "document not found"}), 404
+
     try:
         obj = _s3().get_object(Bucket=KYC_BUCKET, Key=key)
-        return obj["Body"].read(), 200, {"Content-Type": obj.get("ContentType", "application/octet-stream")}
-    except Exception as e:
-        return jsonify({"error": str(e)}), 404
+        return (
+            obj["Body"].read(),
+            200,
+            {"Content-Type": obj.get("ContentType", "application/octet-stream")},
+        )
+    except Exception:
+        return jsonify({"error": "document not found"}), 404
