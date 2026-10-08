@@ -50,3 +50,15 @@ resource "aws_s3_bucket_ownership_controls" "terraform_state" {
     object_ownership = "BucketOwnerEnforced"
   }
 }
+resource "aws_dynamodb_table" "terraform_locks" {
+  name         = "${var.project_name}-${var.environment}-terraform-locks"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  tags = local.common_tags
+}
