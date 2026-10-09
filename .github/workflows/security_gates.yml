@@ -373,7 +373,7 @@ jobs:
           conftest --version
 
       - name: Run OPA policy checks
-        run: conftest test tfplan.json --policy ../policies/terraform
+        run: conftest test tfplan.json --policy ../policies/terraform --all-namespaces
 
       - name: Terraform apply
         run: terraform apply -auto-approve tfplan
